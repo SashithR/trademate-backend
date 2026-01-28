@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
+# ===== models.py =====
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Boolean
 from db import Base
 
 
@@ -18,9 +19,11 @@ class Product(Base):
 
     name = Column(String, nullable=False)
     unit = Column(String, nullable=False)              # bottle, kg, packet
-    sell_price = Column(Float, nullable=False)
 
-    stock_qty = Column(Float, nullable=False, default=0.0)  # supports 0.5, 0.25
+    sell_price = Column(Float, nullable=False)
+    cost_price = Column(Float, nullable=False, default=0.0)
+
+    stock_qty = Column(Float, nullable=False, default=0.0)    # supports 0.5, 0.25
 
 
 class Transaction(Base):
@@ -33,6 +36,10 @@ class Transaction(Base):
     total_amount = Column(Float, nullable=False, default=0.0)
     note = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False)
+
+    is_void = Column(Boolean, nullable=False, default=False)
+    void_reason = Column(String, nullable=True)
+    void_at = Column(DateTime, nullable=True)
 
 
 class TransactionItem(Base):
