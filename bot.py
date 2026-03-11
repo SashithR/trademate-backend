@@ -1,6 +1,7 @@
 import os
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import logging
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -11,37 +12,47 @@ from telegram.ext import (
 )
 
 os.environ["HTTPX_FORCE_IPV4"] = "1"
+logging.basicConfig(level=logging.INFO)
 
-# ---------- CONFIG ----------
-BOT_TOKEN = "8222011135:AAElS8HWUCDUdGzESoRZDo06yzMOWS7811Q"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8222011135:AAHsHU3ahZBe3KE7oToBa9ZuSR3ntQz-Pdw")
 API_BASE = "http://127.0.0.1:8000"
 
-# ---------- IN-MEMORY STATE ----------
-user_shop = {}  # telegram_user_id -> shop_id
+# --------- Local cache (optional) ---------
+user_shop = {}  # telegram_user_id -> shop_id (cache for faster use)
+
+# Track low stock items to avoid repeating alerts
+last_low_set = {}  # shop_id -> set(product_id)
 
 # ===== SALE (multi-item cart) =====
-sale_state = {}          # user_id -> WAIT_SEARCH | WAIT_QTY | WAIT_EDIT_QTY
-sale_selected = {}       # user_id -> selected product dict
-sale_search_results = {} # user_id -> last search results list
-sale_cart = {}           # user_id -> list of cart items [{product_id,name,qty,unit_price}]
-sale_edit_index = {}     # user_id -> int index in cart for edit qty
+sale_state = {}
+sale_selected = {}
+sale_search_results = {}
+sale_cart = {}
+sale_edit_index = {}
 
 # ===== PURCHASE EXISTING =====
-purchase_state = {}          # user_id -> WAIT_SEARCH | WAIT_QTY | WAIT_COST | WAIT_SELL
-purchase_selected = {}       # user_id -> product dict
-purchase_search_results = {} # user_id -> last purchase search results list
-purchase_qty = {}            # user_id -> qty float
-purchase_cost = {}           # user_id -> cost float
+purchase_state = {}
+purchase_selected = {}
+purchase_search_results = {}
+purchase_qty = {}
+purchase_cost = {}
+purchase_sell = {}
+purchase_alert = {}
 
 # ===== ADD NEW PRODUCT =====
-newp_state = {}        # user_id -> WAIT_NEW_NAME | WAIT_NEW_UNIT | WAIT_NEW_QTY | WAIT_NEW_COST | WAIT_NEW_SELL
-newp_name = {}         # user_id -> str
-newp_unit = {}         # user_id -> str
-newp_qty = {}          # user_id -> float
-newp_cost = {}         # user_id -> float
+newp_state = {}
+newp_name = {}
+newp_unit = {}
+newp_qty = {}
+newp_cost = {}
+newp_sell = {}
+newp_alert = {}
+
+# ===== CASH OUT =====
+cashout_state = {}   # user_id -> WAIT_REASON | WAIT_AMOUNT
+cashout_reason = {}  # user_id -> str | None
 
 
-# ---------- HELPERS ----------
 def clear_sale(user_id: int):
     sale_state.pop(user_id, None)
     sale_selected.pop(user_id, None)
@@ -57,6 +68,8 @@ def clear_purchase(user_id: int):
     purchase_search_results.pop(user_id, None)
     purchase_qty.pop(user_id, None)
     purchase_cost.pop(user_id, None)
+    purchase_sell.pop(user_id, None)
+    purchase_alert.pop(user_id, None)
 
 def clear_new_product(user_id: int):
     newp_state.pop(user_id, None)
@@ -64,6 +77,12 @@ def clear_new_product(user_id: int):
     newp_unit.pop(user_id, None)
     newp_qty.pop(user_id, None)
     newp_cost.pop(user_id, None)
+    newp_sell.pop(user_id, None)
+    newp_alert.pop(user_id, None)
+
+def clear_cashout(user_id: int):
+    cashout_state.pop(user_id, None)
+    cashout_reason.pop(user_id, None)
 
 def ensure_cart(user_id: int):
     if user_id not in sale_cart:
@@ -99,10 +118,14 @@ def format_cart_message(user_id: int, added_line: str = "") -> str:
 
 def main_menu_markup() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("New Sale", callback_data="SALE")],
-        [InlineKeyboardButton("Purchase Product", callback_data="PURCHASE_EXISTING")],
-        [InlineKeyboardButton("Add New Product", callback_data="PURCHASE_NEW")],
-        [InlineKeyboardButton("Today Summary", callback_data="SUMMARY")],
+        [InlineKeyboardButton("New Sale-විකුනුම්", callback_data="SALE")],
+        [InlineKeyboardButton("Purchase Product-භාණ්ඩ ගැනීම.", callback_data="PURCHASE_EXISTING")],
+        [InlineKeyboardButton("Add New Product-නව භාණ්ඩ ගැනීම.", callback_data="PURCHASE_NEW")],
+        [InlineKeyboardButton("Low Stock-හිග තොග", callback_data="LOW_STOCK")],
+        [InlineKeyboardButton("Take Cash Out-මුදල් ඉවත් කිරීම", callback_data="CASH_OUT")],
+        [InlineKeyboardButton("Daily Summary-දවසේ සාරාංශය", callback_data="SUMMARY_DAILY")],
+        [InlineKeyboardButton("Weekly Summary-සතියේ සාරාංශය", callback_data="SUMMARY_WEEKLY")],
+        [InlineKeyboardButton("Monthly Summary-මාසික සරාංශය", callback_data="SUMMARY_MONTHLY")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -111,27 +134,27 @@ def cancel_only_markup(tag: str) -> InlineKeyboardMarkup:
 
 def back_cancel_markup(back_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Back", callback_data=back_cb)],
-        [InlineKeyboardButton("Cancel", callback_data=cancel_cb)],
+        [InlineKeyboardButton("Back-ආපසු", callback_data=back_cb)],
+        [InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data=cancel_cb)],
     ])
 
 def sale_action_buttons() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("Add More", callback_data="SALE_ADD_MORE")],
-        [InlineKeyboardButton("Edit Cart", callback_data="SALE_EDIT")],
-        [InlineKeyboardButton("Finish Sale", callback_data="SALE_FINISH")],
-        [InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")],
+        [InlineKeyboardButton("Add More-තව එක් කරන්න", callback_data="SALE_ADD_MORE")],
+        [InlineKeyboardButton("Edit Cart-වෙනස් කරන්", callback_data="SALE_EDIT")],
+        [InlineKeyboardButton("Finish Sale-අවසන් කරන්න", callback_data="SALE_FINISH")],
+        [InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def build_sale_menu_buttons(products):
     buttons = []
     for p in products:
-        buttons.append([InlineKeyboardButton(p["name"], callback_data=f"SALE_PROD:{p['product_id']}")])
-    buttons.append([InlineKeyboardButton("Search Product", callback_data="SALE_SEARCH")])
-    buttons.append([InlineKeyboardButton("Edit Cart", callback_data="SALE_EDIT")])
-    buttons.append([InlineKeyboardButton("Finish Sale", callback_data="SALE_FINISH")])
-    buttons.append([InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")])
+        buttons.append([InlineKeyboardButton(f"{p['name']}", callback_data=f"SALE_PROD:{p['product_id']}")])
+    buttons.append([InlineKeyboardButton("Search Product-සොයන්", callback_data="SALE_SEARCH")])
+    buttons.append([InlineKeyboardButton("Edit Cart-වෙනස් කරන්", callback_data="SALE_EDIT")])
+    buttons.append([InlineKeyboardButton("Finish Sale-අවසන් කරන්න", callback_data="SALE_FINISH")])
+    buttons.append([InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")])
     return InlineKeyboardMarkup(buttons)
 
 def build_sale_edit_menu(user_id: int) -> InlineKeyboardMarkup:
@@ -139,25 +162,24 @@ def build_sale_edit_menu(user_id: int) -> InlineKeyboardMarkup:
     buttons = []
 
     if not cart:
-        buttons.append([InlineKeyboardButton("Back", callback_data="SALE_BACK_TO_MENU")])
-        buttons.append([InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")])
+        buttons.append([InlineKeyboardButton("Back-ආපසු", callback_data="SALE_BACK_TO_MENU")])
+        buttons.append([InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")])
         return InlineKeyboardMarkup(buttons)
 
-    # Each item: "Change Qty" and "Remove"
     for idx, it in enumerate(cart):
         title = f"{idx+1}) {it['name']} (qty {it['qty']})"
         buttons.append([InlineKeyboardButton(title, callback_data=f"SALE_EDIT_ITEM:{idx}")])
 
-    buttons.append([InlineKeyboardButton("Back", callback_data="SALE_BACK_TO_MENU")])
-    buttons.append([InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")])
+    buttons.append([InlineKeyboardButton("Back-ආපසු", callback_data="SALE_BACK_TO_MENU")])
+    buttons.append([InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")])
     return InlineKeyboardMarkup(buttons)
 
 def build_sale_item_actions(idx: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Change Qty", callback_data=f"SALE_EDIT_QTY:{idx}")],
-        [InlineKeyboardButton("Remove Item", callback_data=f"SALE_REMOVE:{idx}")],
-        [InlineKeyboardButton("Back", callback_data="SALE_EDIT")],
-        [InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")],
+        [InlineKeyboardButton("Change Qty-ප්‍රමාණය වෙනස් කරන්න", callback_data=f"SALE_EDIT_QTY:{idx}")],
+        [InlineKeyboardButton("Remove Item-අයිතම ඉවත් කරන්න", callback_data=f"SALE_REMOVE:{idx}")],
+        [InlineKeyboardButton("Back-ආපසු", callback_data="SALE_EDIT")],
+        [InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")],
     ])
 
 def unit_buttons_markup() -> InlineKeyboardMarkup:
@@ -174,26 +196,127 @@ def unit_buttons_markup() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(unit_buttons)
 
+def _fetch_low_stock(shop_id: int):
+    try:
+        r = requests.get(f"{API_BASE}/stock/low", params={"shop_id": shop_id}, timeout=10)
+    except Exception:
+        return None, "Backend not reachable. Is FastAPI running?"
+
+    if r.status_code != 200:
+        return None, f"Error getting low stock: {r.text}"
+
+    return (r.json() or []), None
+
+def _format_low_stock_message(items, title: str = "⚠ Low Stock"):
+    if not items:
+        return "No low stock items ✅"
+
+    lines = [title]
+    for it in items[:15]:
+        lines.append(f"- {it['name']} : {it['stock_qty']} (alert {it['alert_qty']})")
+    if len(items) > 15:
+        lines.append(f"+{len(items) - 15} more")
+    return "\n".join(lines)
+
+async def notify_new_low_stock(context: ContextTypes.DEFAULT_TYPE, chat_id: int, shop_id: int):
+    items, err = _fetch_low_stock(shop_id)
+    if err:
+        return
+
+    current_low = set(int(it["product_id"]) for it in items if "product_id" in it)
+    prev_low = last_low_set.get(shop_id, set())
+    newly_low = current_low - prev_low
+
+    last_low_set[shop_id] = current_low
+
+    if not newly_low:
+        return
+
+    show_items = [it for it in items if int(it["product_id"]) in newly_low]
+    msg = _format_low_stock_message(show_items, title="⚠ Low Stock (New)")
+    msg += "\n\nPress Low Stock in menu to view all current low stock items."
+    await context.bot.send_message(chat_id=chat_id, text=msg)
+
+def _get_shop_for_telegram_user(telegram_user_id: str):
+    try:
+        r = requests.get(f"{API_BASE}/telegram/shop", params={"telegram_user_id": telegram_user_id}, timeout=10)
+    except Exception:
+        return None, "Backend not reachable. Is FastAPI running?"
+
+    if r.status_code != 200:
+        return None, f"Error: {r.text}"
+
+    data = r.json() or {}
+    if not data.get("linked"):
+        return None, None
+
+    return int(data["shop_id"]), None
+
+def _consume_link_token(link_token: str, telegram_user_id: str, chat_id: int):
+    try:
+        r = requests.post(
+            f"{API_BASE}/telegram/consume-link-token",
+            json={
+                "link_token": link_token,
+                "telegram_user_id": str(telegram_user_id),
+                "chat_id": str(chat_id),
+            },
+            timeout=10,
+        )
+    except Exception:
+        return None, "Backend not reachable. Is FastAPI running?"
+
+    if r.status_code != 200:
+        return None, r.text
+
+    data = r.json() or {}
+    if not data.get("ok"):
+        return None, "Link failed"
+
+    return int(data["shop_id"]), None
+
 
 # ---------- COMMANDS ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    args = context.args or []
+    if args:
+        link_token = args[0].strip()
+        shop_id, err = _consume_link_token(link_token, str(user_id), chat_id)
+        if err or not shop_id:
+            await update.message.reply_text(
+                "I could not link your Telegram to the website account.\n"
+                "Please try the website button again."
+            )
+            return
+
+        user_shop[user_id] = shop_id
+        await update.message.reply_text(
+            f"✅ Connected to your shop (shop_id={shop_id})\n\nTrade Mate Menu\nChoose an option:",
+            reply_markup=main_menu_markup(),
+        )
+        return
+
+    if user_id not in user_shop:
+        shop_id, err = _get_shop_for_telegram_user(str(user_id))
+        if err:
+            await update.message.reply_text(err)
+            return
+        if not shop_id:
+            await update.message.reply_text(
+                "Your Telegram is not connected to a shop yet.\n\n"
+                "Go to the Trade Mate website dashboard and click “Your Telegram Bot Shop”.\n"
+                "Then come back here and press /start again."
+            )
+            return
+        user_shop[user_id] = shop_id
+
     await update.message.reply_text(
         "Trade Mate Menu\nChoose an option:",
         reply_markup=main_menu_markup(),
     )
-
-async def link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Use: /link 1")
-        return
-    try:
-        shop_id = int(context.args[0])
-    except ValueError:
-        await update.message.reply_text("Shop id must be a number. Example: /link 1")
-        return
-
-    user_shop[update.effective_user.id] = shop_id
-    await update.message.reply_text(f"Shop linked successfully (shop_id={shop_id})")
 
 
 # ---------- BUTTON HANDLER ----------
@@ -202,11 +325,95 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
+    chat_id = query.message.chat_id
     data = query.data
-    shop_id = user_shop.get(user_id)
 
-    if not shop_id and data not in ("SALE_CANCEL", "PUR_CANCEL", "NEWP_CANCEL"):
-        await query.message.reply_text("Link your shop first: /link 1")
+    shop_id = user_shop.get(user_id)
+    if not shop_id:
+        await query.message.reply_text(
+            "Your Telegram is not connected to a shop yet.\n\n"
+            "Go to the Trade Mate website dashboard and click “Your Telegram Bot Shop”.\n"
+            "Then come back here and press /start again."
+        )
+        return
+
+    if data == "LOW_STOCK":
+        items, err = _fetch_low_stock(shop_id)
+        if err:
+            await query.message.reply_text(err, reply_markup=main_menu_markup())
+            return
+
+        msg = _format_low_stock_message(items, title="⚠ Low Stock (Current)")
+        await query.message.reply_text(msg, reply_markup=main_menu_markup())
+        return
+
+    # =========================
+    # CASH OUT FLOW
+    # =========================
+    if data == "CASH_OUT":
+        clear_sale(user_id)
+        clear_sale_cart(user_id)
+        clear_purchase(user_id)
+        clear_new_product(user_id)
+        clear_cashout(user_id)
+
+        cashout_state[user_id] = "WAIT_REASON"
+        await query.message.reply_text(
+            "Take Cash Out\nEnter reason or type 0 to skip:",
+            reply_markup=back_cancel_markup("CASHOUT_BACK_MENU", "CASHOUT_CANCEL"),
+        )
+        return
+
+    if data == "CASHOUT_BACK_MENU":
+        clear_cashout(user_id)
+        await query.message.reply_text("Back to menu:", reply_markup=main_menu_markup())
+        return
+
+    if data == "CASHOUT_BACK_REASON":
+        cashout_state[user_id] = "WAIT_REASON"
+        await query.message.reply_text(
+            "Enter reason or type 0 to skip:",
+            reply_markup=back_cancel_markup("CASHOUT_BACK_MENU", "CASHOUT_CANCEL"),
+        )
+        return
+
+    if data == "CASHOUT_CANCEL":
+        clear_cashout(user_id)
+        await query.message.reply_text("Cash out cancelled", reply_markup=main_menu_markup())
+        return
+
+    if data in ("SUMMARY_DAILY", "SUMMARY_WEEKLY", "SUMMARY_MONTHLY"):
+        period = "daily"
+        if data == "SUMMARY_WEEKLY":
+            period = "weekly"
+        elif data == "SUMMARY_MONTHLY":
+            period = "monthly"
+
+        try:
+            r = requests.get(
+                f"{API_BASE}/reports/summary",
+                params={"shop_id": shop_id, "period": period},
+                timeout=10
+            )
+        except Exception:
+            await query.message.reply_text("Backend not reachable. Is FastAPI running?")
+            return
+
+        if r.status_code != 200:
+            await query.message.reply_text(f"Error getting summary: {r.text}")
+            return
+
+        s = r.json()
+        await query.message.reply_text(
+            f"{period.title()} Summary\n"
+            f"Sales: {s['sales_total']}\n"
+            f"Purchases: {s['purchases_total']}\n"
+            f"Cash Out: {s['cash_out_total']}\n"
+            f"Profit: {s['profit']}\n"
+            f"Net Cash: {s['net_cash']}\n"
+            f"From: {s['start_date']} To: {s['end_date']}",
+            reply_markup=main_menu_markup(),
+        )
         return
 
     # =========================
@@ -215,6 +422,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "SALE":
         clear_purchase(user_id)
         clear_new_product(user_id)
+        clear_cashout(user_id)
         clear_sale(user_id)
         ensure_cart(user_id)
 
@@ -299,7 +507,12 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_sale(user_id)
         clear_sale_cart(user_id)
 
-        await query.message.reply_text(f"Sale recorded ✅\nItems: {item_count}\nTotal: {total}", reply_markup=main_menu_markup())
+        await query.message.reply_text(
+            f"Sale recorded ✅\nItems: {item_count}\nTotal: {total}",
+            reply_markup=main_menu_markup(),
+        )
+
+        await notify_new_low_stock(context, chat_id, shop_id)
         return
 
     if data == "SALE_EDIT":
@@ -395,6 +608,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_sale(user_id)
         clear_sale_cart(user_id)
         clear_new_product(user_id)
+        clear_cashout(user_id)
         clear_purchase(user_id)
 
         purchase_state[user_id] = "WAIT_SEARCH"
@@ -411,7 +625,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "PUR_CANCEL":
         clear_purchase(user_id)
-        await query.message.reply_text("Purchase cancelled ❌", reply_markup=main_menu_markup())
+        await query.message.reply_text("Purchase cancelled", reply_markup=main_menu_markup())
         return
 
     if data.startswith("PURCHASE_PROD:"):
@@ -450,6 +664,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_sale(user_id)
         clear_sale_cart(user_id)
         clear_purchase(user_id)
+        clear_cashout(user_id)
         clear_new_product(user_id)
 
         newp_state[user_id] = "WAIT_NEW_NAME"
@@ -461,7 +676,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "NEWP_CANCEL":
         clear_new_product(user_id)
-        await query.message.reply_text("New product cancelled ❌", reply_markup=main_menu_markup())
+        await query.message.reply_text("New product cancelled", reply_markup=main_menu_markup())
         return
 
     if data == "NEWP_BACK":
@@ -488,8 +703,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
+        if step == "WAIT_NEW_ALERT":
+            newp_state[user_id] = "WAIT_NEW_SELL"
+            await query.message.reply_text(
+                "Enter selling price per unit (example: 250):",
+                reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
+            )
+            return
 
-        # default: go to menu
         clear_new_product(user_id)
         await query.message.reply_text("Back to menu:", reply_markup=main_menu_markup())
         return
@@ -504,39 +725,69 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # =========================
-    # SUMMARY
-    # =========================
-    if data == "SUMMARY":
-        try:
-            r = requests.get(f"{API_BASE}/summary/today", params={"shop_id": shop_id}, timeout=10)
-        except Exception:
-            await query.message.reply_text("Backend not reachable. Is FastAPI running?")
-            return
-
-        if r.status_code != 200:
-            await query.message.reply_text(f"Error getting summary: {r.text}")
-            return
-
-        s = r.json()
-        await query.message.reply_text(
-            f"Today Summary\nSales: {s['sales_total']}\nPurchases: {s['purchases_total']}\nNet Cash: {s['net_cash']}",
-            reply_markup=main_menu_markup(),
-        )
-        return
-
 
 # ---------- TEXT HANDLER ----------
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     text = (update.message.text or "").strip()
+
     shop_id = user_shop.get(user_id)
     if not shop_id:
         return
 
-    # =========================
-    # SALE FLOW
-    # =========================
+    # CASH OUT
+    if cashout_state.get(user_id) == "WAIT_REASON":
+        if text == "0":
+            cashout_reason[user_id] = None
+        else:
+            cashout_reason[user_id] = text
+
+        cashout_state[user_id] = "WAIT_AMOUNT"
+        await update.message.reply_text(
+            "Enter cash out amount:",
+            reply_markup=back_cancel_markup("CASHOUT_BACK_REASON", "CASHOUT_CANCEL"),
+        )
+        return
+
+    if cashout_state.get(user_id) == "WAIT_AMOUNT":
+        try:
+            amount = float(text)
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "Enter a valid amount greater than 0.",
+                reply_markup=back_cancel_markup("CASHOUT_BACK_REASON", "CASHOUT_CANCEL"),
+            )
+            return
+
+        payload = {
+            "shop_id": shop_id,
+            "amount": float(amount),
+            "note": cashout_reason.get(user_id),
+        }
+
+        try:
+            r = requests.post(f"{API_BASE}/cash-out", json=payload, timeout=10)
+        except Exception:
+            await update.message.reply_text("Backend not reachable. Is FastAPI running?")
+            return
+
+        if r.status_code != 200:
+            await update.message.reply_text(f"Cash out failed: {r.text}")
+            return
+
+        note = cashout_reason.get(user_id)
+        msg = f"Cash out recorded ✅\nAmount: {amount}"
+        if note:
+            msg += f"\nReason: {note}"
+
+        clear_cashout(user_id)
+        await update.message.reply_text(msg, reply_markup=main_menu_markup())
+        return
+
+    # SALE SEARCH
     if sale_state.get(user_id) == "WAIT_SEARCH":
         try:
             r = requests.get(f"{API_BASE}/products/search", params={"shop_id": shop_id, "q": text, "limit": 10}, timeout=10)
@@ -630,15 +881,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         cart[idx]["qty"] = new_qty
-        clear_sale(user_id)  # clears edit state too
+        clear_sale(user_id)
 
         msg = format_cart_message(user_id, added_line=f"Updated ✅\n- {cart[idx]['name']} qty = {new_qty}")
         await update.message.reply_text(msg, reply_markup=sale_action_buttons())
         return
 
-    # =========================
-    # PURCHASE EXISTING FLOW
-    # =========================
+    # PURCHASE SEARCH
     if purchase_state.get(user_id) == "WAIT_SEARCH":
         try:
             r = requests.get(f"{API_BASE}/products/search", params={"shop_id": shop_id, "q": text, "limit": 10}, timeout=10)
@@ -682,7 +931,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         purchase_state[user_id] = "WAIT_COST"
         await update.message.reply_text(
             f"Qty: {qty}\nEnter cost price per unit (example: 180):",
-            reply_markup=back_cancel_markup("PUR_BACK_QTY", "PUR_CANCEL"),
+            reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
         )
         return
 
@@ -694,7 +943,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text(
                 "Enter a valid cost price (example: 180)",
-                reply_markup=back_cancel_markup("PUR_BACK_QTY", "PUR_CANCEL"),
+                reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
             )
             return
 
@@ -702,20 +951,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         purchase_state[user_id] = "WAIT_SELL"
         await update.message.reply_text(
             f"Cost: {cost}\nEnter selling price per unit (example: 250):",
-            reply_markup=back_cancel_markup("PUR_BACK_COST", "PUR_CANCEL"),
+            reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
         )
         return
 
     if purchase_state.get(user_id) == "WAIT_SELL":
-        chosen = purchase_selected.get(user_id)
-        qty = purchase_qty.get(user_id)
-        cost = purchase_cost.get(user_id)
-
-        if not chosen or qty is None or cost is None:
-            await update.message.reply_text("Purchase state lost. Tap Purchase Product again.")
-            clear_purchase(user_id)
-            return
-
         try:
             sell = float(text)
             if sell < 0:
@@ -723,7 +963,37 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text(
                 "Enter a valid selling price (example: 250)",
-                reply_markup=back_cancel_markup("PUR_BACK_COST", "PUR_CANCEL"),
+                reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
+            )
+            return
+
+        purchase_sell[user_id] = sell
+        purchase_state[user_id] = "WAIT_ALERT"
+        await update.message.reply_text(
+            "Enter stock alert quantity (example: 5). Use 0 to disable:",
+            reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
+        )
+        return
+
+    if purchase_state.get(user_id) == "WAIT_ALERT":
+        chosen = purchase_selected.get(user_id)
+        qty = purchase_qty.get(user_id)
+        cost = purchase_cost.get(user_id)
+        sell = purchase_sell.get(user_id)
+
+        if not chosen or qty is None or cost is None or sell is None:
+            await update.message.reply_text("Purchase state lost. Tap Purchase Product again.")
+            clear_purchase(user_id)
+            return
+
+        try:
+            alert = float(text)
+            if alert < 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "Enter a valid alert quantity (example: 5). Use 0 to disable.",
+                reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
             )
             return
 
@@ -732,8 +1002,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "items": [{
                 "product_id": int(chosen["product_id"]),
                 "qty": float(qty),
-                "unit_price": float(cost),   # cost
-                "sell_price": float(sell),   # selling price update
+                "unit_price": float(cost),
+                "sell_price": float(sell),
+                "alert_qty": float(alert),
             }],
         }
 
@@ -749,23 +1020,17 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         total = r.json().get("total_amount", "OK")
         await update.message.reply_text(
-            f"Purchase recorded ✅\nProduct: {chosen['name']}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nTotal cost: {total}",
+            f"Purchase recorded ✅\nProduct: {chosen['name']}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nAlert qty: {alert}\nTotal cost: {total}",
             reply_markup=main_menu_markup(),
         )
         clear_purchase(user_id)
+        await notify_new_low_stock(context, chat_id, shop_id)
         return
 
-    # Back handlers for purchase steps
-    # These are done as "virtual" back steps by using state changes:
-    # We trigger them by callback buttons, but they are handled in on_button.
-    # For simplicity here, we keep only state transitions in callbacks.
-
-    # =========================
-    # ADD NEW PRODUCT FLOW
-    # =========================
+    # ADD NEW PRODUCT
     if newp_state.get(user_id) == "WAIT_NEW_NAME":
         if len(text) < 2:
-            await update.message.reply_text("Enter a valid product name (example: White Rice basmathi):", reply_markup=cancel_only_markup("NEWP"))
+            await update.message.reply_text("Enter a valid product name:", reply_markup=cancel_only_markup("NEWP"))
             return
 
         newp_name[user_id] = text
@@ -835,7 +1100,37 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 1) create product (backend requires cost_price)
+        newp_sell[user_id] = sell
+        newp_state[user_id] = "WAIT_NEW_ALERT"
+        await update.message.reply_text(
+            "Enter stock alert quantity (example: 5). Use 0 to disable:",
+            reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
+        )
+        return
+
+    if newp_state.get(user_id) == "WAIT_NEW_ALERT":
+        name = newp_name.get(user_id)
+        unit = newp_unit.get(user_id)
+        qty = newp_qty.get(user_id)
+        cost = newp_cost.get(user_id)
+        sell = newp_sell.get(user_id)
+
+        if not name or not unit or qty is None or cost is None or sell is None:
+            await update.message.reply_text("New product state lost. Tap Add New Product again.")
+            clear_new_product(user_id)
+            return
+
+        try:
+            alert = float(text)
+            if alert < 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "Enter a valid alert quantity (example: 5). Use 0 to disable.",
+                reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
+            )
+            return
+
         try:
             pr = requests.post(
                 f"{API_BASE}/products",
@@ -846,6 +1141,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "sell_price": float(sell),
                     "cost_price": float(cost),
                     "stock_qty": 0,
+                    "alert_qty": float(alert),
                 },
                 timeout=10,
             )
@@ -865,7 +1161,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             clear_new_product(user_id)
             return
 
-        # 2) purchase it
         try:
             r = requests.post(
                 f"{API_BASE}/purchases",
@@ -876,6 +1171,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "qty": float(qty),
                         "unit_price": float(cost),
                         "sell_price": float(sell),
+                        "alert_qty": float(alert),
                     }],
                 },
                 timeout=10,
@@ -892,38 +1188,22 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         total = r.json().get("total_amount", "OK")
         await update.message.reply_text(
-            f"Product added + Purchase recorded ✅\nProduct: {name}\nUnit: {unit}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nTotal cost: {total}",
+            f"Product added + Purchase recorded ✅\nProduct: {name}\nUnit: {unit}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nAlert qty: {alert}\nTotal cost: {total}",
             reply_markup=main_menu_markup(),
         )
         clear_new_product(user_id)
+        await notify_new_low_stock(context, chat_id, shop_id)
         return
 
 
-# ---------- PURCHASE BACK BUTTONS (handled in callbacks) ----------
-# We implement them inside on_button by setting state.
-# But we already added buttons, so we need the state transitions too:
-async def _purchase_back_handler(update: Update, data: str):
-    # Not used, kept here only if you want to refactor later.
-    pass
-
-
-# Patch missing purchase back callbacks inside on_button:
-# (We keep it simple by adding these checks at the end of on_button.)
-# NOTE: This is safe because it only changes state and sends messages.
-
-
-# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("link", link))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
-    print("Bot is running...")
+    logging.info("Bot is running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
