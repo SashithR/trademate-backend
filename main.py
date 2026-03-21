@@ -170,6 +170,7 @@ class CashOutCreate(BaseModel):
     shop_id: int
     amount: float
     note: Optional[str] = None
+ 
 
 
 # ---------------------------
@@ -694,6 +695,7 @@ def create_purchase(payload: TxCreate):
     finally:
         db.close()
 
+
 @app.post("/cash-out")
 def create_cash_out(payload: CashOutCreate):
     db = SessionLocal()
@@ -1056,7 +1058,7 @@ def reports_pdf(shop_id: int, period: str = "daily"):
         c.drawString(40, y, "Transactions (Detailed)")
         y -= 18
 
-        tx_col = {"id": 40, "type": 90, "date": 180, "time": 280, "total": 360}
+        tx_col = {"id": 40, "type": 90, "date": 170, "time": 255, "total": 345, "note": 430}
 
         def draw_tx_header(ypos: float):
             c.setFont("Helvetica-Bold", 10)
@@ -1064,7 +1066,8 @@ def reports_pdf(shop_id: int, period: str = "daily"):
             c.drawString(tx_col["type"], ypos, "Type")
             c.drawString(tx_col["date"], ypos, "Date")
             c.drawString(tx_col["time"], ypos, "Time")
-            c.drawRightString(tx_col["total"] + 80, ypos, "Total")
+            c.drawRightString(tx_col["total"] + 70, ypos, "Total")
+            c.drawString(tx_col["note"], ypos, "Note")
             ypos -= 6
             c.setLineWidth(1)
             c.line(40, ypos, width - 40, ypos)
@@ -1097,13 +1100,17 @@ def reports_pdf(shop_id: int, period: str = "daily"):
                     y = draw_tx_header(y)
 
                 tx_date, tx_time = fmt_dt(tx["created_at"])
+                note_text = tx.get("note") or "-"
+                if len(note_text) > 18:
+                    note_text = note_text[:18] + "..."
 
                 c.setFont("Helvetica", 10)
                 c.drawString(tx_col["id"], y, f"#{tx['id']}")
                 c.drawString(tx_col["type"], y, tx["type"])
                 c.drawString(tx_col["date"], y, tx_date)
                 c.drawString(tx_col["time"], y, tx_time)
-                c.drawRightString(tx_col["total"] + 80, y, f"{tx['total_amount']:.2f}")
+                c.drawRightString(tx_col["total"] + 70, y, f"{tx['total_amount']:.2f}")
+                c.drawString(tx_col["note"], y, note_text)
                 y -= 14
 
                 if y < 110:
@@ -1111,7 +1118,8 @@ def reports_pdf(shop_id: int, period: str = "daily"):
                     y = draw_tx_header(y)
 
                 items = tx.get("items", [])
-                if items:
+
+                if tx["type"] != "CASH_OUT" and items:
                     y = draw_item_header(y)
 
                     for it in items:
@@ -1135,19 +1143,7 @@ def reports_pdf(shop_id: int, period: str = "daily"):
                         c.drawRightString(item_col["ptotal"] + 80, y, f"{product_total:.2f}")
                         y -= 12
 
-                else:
-                    if y < 90:
-                        y = new_page("Transactions (Continued)")
-                        y = draw_tx_header(y)
-                    c.setFont("Helvetica", 9)
-                    note = tx.get("note") or "-"
-                    if len(note) > 55:
-                        note = note[:55] + "..."
-                    c.drawString(60, y, f"Note: {note}")
-                    y -= 12
-
                 y -= 8
-
         c.showPage()
         c.save()
 
