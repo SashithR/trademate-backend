@@ -98,7 +98,7 @@ def format_cart_message(user_id: int, added_line: str = "") -> str:
 
     lines = []
     if added_line:
-        lines.append("Added ✅")
+        lines.append("Added ")
         lines.append(added_line)
         lines.append("")
 
@@ -141,7 +141,7 @@ def back_cancel_markup(back_cb: str, cancel_cb: str) -> InlineKeyboardMarkup:
 def sale_action_buttons() -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton("Add More-තව එක් කරන්න", callback_data="SALE_ADD_MORE")],
-        [InlineKeyboardButton("Edit Cart-වෙනස් කරන්", callback_data="SALE_EDIT")],
+        [InlineKeyboardButton("Edit Cart-වෙනස් කරන්න", callback_data="SALE_EDIT")],
         [InlineKeyboardButton("Finish Sale-අවසන් කරන්න", callback_data="SALE_FINISH")],
         [InlineKeyboardButton("Cancel-අවලංගු කරන්න", callback_data="SALE_CANCEL")],
     ]
@@ -209,7 +209,7 @@ def _fetch_low_stock(shop_id: int):
 
 def _format_low_stock_message(items, title: str = "⚠ Low Stock"):
     if not items:
-        return "No low stock items ✅"
+        return "No low stock items -අඩු තොග නැත."
 
     lines = [title]
     for it in items[:15]:
@@ -234,7 +234,7 @@ async def notify_new_low_stock(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
 
     show_items = [it for it in items if int(it["product_id"]) in newly_low]
     msg = _format_low_stock_message(show_items, title="⚠ Low Stock (New)")
-    msg += "\n\nPress Low Stock in menu to view all current low stock items."
+    msg += "\n\nPress Low Stock in menu to view all current low stock items.\nඅවම තොග බලාගැනීමට මෙනුව භාවිතා කරන්න"
     await context.bot.send_message(chat_id=chat_id, text=msg)
 
 def _get_shop_for_telegram_user(telegram_user_id: str):
@@ -288,13 +288,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if err or not shop_id:
             await update.message.reply_text(
                 "I could not link your Telegram to the website account.\n"
-                "Please try the website button again."
+                "Please try the website button again.\nසම්බන්ද කිරීමට නොහැකී, නැවත බටනය ඔබා උත්සහ කරන්න"
             )
             return
 
         user_shop[user_id] = shop_id
         await update.message.reply_text(
-            f"✅ Connected to your shop (shop_id={shop_id})\n\nTrade Mate Menu\nChoose an option:",
+            f" Connected to your shop (shop_id={shop_id})\n\nTrade Mate Menu\nChoose an option:\nTrade Mate මෙනුව, අවශ්‍යතාවය තෝරන්න.",
             reply_markup=main_menu_markup(),
         )
         return
@@ -308,13 +308,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "Your Telegram is not connected to a shop yet.\n\n"
                 "Go to the Trade Mate website dashboard and click “ Telegram Bot ”.\n"
-                "Then come back here and press /start again."
+                "Then come back here and press /start again.\nබොට් සම්බන්ද වී නැත, නැවත වෙබ් පිටුවට ගොස් බටනය මගින් උත්සහ කරන්න"
             )
             return
         user_shop[user_id] = shop_id
 
     await update.message.reply_text(
-        "Trade Mate Menu\nChoose an option:",
+        "Trade Mate Menu\nChoose an option:\nTrade Mate මෙනුව, අවශ්‍යතාවය තෝරන්න.",
         reply_markup=main_menu_markup(),
     )
 
@@ -333,7 +333,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "Your Telegram is not connected to a shop yet.\n\n"
             "Go to the Trade Mate website dashboard and click “Your Telegram Bot Shop”.\n"
-            "Then come back here and press /start again."
+            "Then come back here and press /start again.\nබොට් සම්බනද වී නැත, නැවත වෙබ් පිටුවට ගොස් බටනය මගින් උත්සහ කරන්න"
         )
         return
 
@@ -359,7 +359,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         cashout_state[user_id] = "WAIT_REASON"
         await query.message.reply_text(
-            "Take Cash Out\nEnter reason or type 0 to skip:",
+            "Take Cash Out\nEnter reason or type 0 to skip:\nමුදල් ගැනීමට හේතුව:",
             reply_markup=back_cancel_markup("CASHOUT_BACK_MENU", "CASHOUT_CANCEL"),
         )
         return
@@ -372,7 +372,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "CASHOUT_BACK_REASON":
         cashout_state[user_id] = "WAIT_REASON"
         await query.message.reply_text(
-            "Enter reason or type 0 to skip:",
+            "Enter reason or type 0 to skip:\nමුදල් ගැනීමට හේතුව:",
             reply_markup=back_cancel_markup("CASHOUT_BACK_MENU", "CASHOUT_CANCEL"),
         )
         return
@@ -438,16 +438,16 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         products = r.json() or []
         if not products:
-            await query.message.reply_text("No products found for this shop.")
+            await query.message.reply_text("No products found for this shop.\nමේ භාණ්ඩය මෙම වෙළදසල තුල සොයා ගැනීමට නොහැකි.")
             return
 
-        await query.message.reply_text("New Sale\nSelect a product:", reply_markup=build_sale_menu_buttons(products))
+        await query.message.reply_text("New Sale\nSelect a product:\nභාණ්ඩය තෝරන්න", reply_markup=build_sale_menu_buttons(products))
         return
 
     if data == "SALE_SEARCH":
         sale_state[user_id] = "WAIT_SEARCH"
         await query.message.reply_text(
-            "Type product name to search:",
+            "Type product name to search:\nසෙවීමට භාණ්ඩයේ නම ඉදිරිපත් කරන්න.",
             reply_markup=back_cancel_markup("SALE_BACK_TO_MENU", "SALE_CANCEL"),
         )
         return
@@ -468,22 +468,22 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         products = r.json() or []
         if not products:
-            await query.message.reply_text("No products found for this shop.")
+            await query.message.reply_text("No products found for this shop.\nමේ භාණ්ඩය මෙම වෙළදසල තුල සොයා ගැනීමට නොහැකි.")
             return
 
-        await query.message.reply_text("Select next product:", reply_markup=build_sale_menu_buttons(products))
+        await query.message.reply_text("Select next product:\nඊලග භාණ්ඩය තෝරන්න", reply_markup=build_sale_menu_buttons(products))
         return
 
     if data == "SALE_CANCEL":
         clear_sale(user_id)
         clear_sale_cart(user_id)
-        await query.message.reply_text("Sale cancelled ❌", reply_markup=main_menu_markup())
+        await query.message.reply_text("Sale cancelled ", reply_markup=main_menu_markup())
         return
 
     if data == "SALE_FINISH":
         cart = sale_cart.get(user_id, [])
         if not cart:
-            await query.message.reply_text("Cart is empty. Add products first.")
+            await query.message.reply_text("Cart is empty. Add products first.\nසෙවීමට භාණ්ඩයේ නම ඉදිරිපත් කරන්න.")
             return
 
         payload = {
@@ -508,7 +508,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_sale_cart(user_id)
 
         await query.message.reply_text(
-            f"Sale recorded ✅\nItems: {item_count}\nTotal: {total}",
+            f"Sale recorded \nItems: {item_count}\nTotal: {total}",
             reply_markup=main_menu_markup(),
         )
 
@@ -517,14 +517,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "SALE_EDIT":
         ensure_cart(user_id)
-        await query.message.reply_text("Edit Cart\nChoose an item:", reply_markup=build_sale_edit_menu(user_id))
+        await query.message.reply_text("Edit Cart\nChoose an item:\nකූඩයේ භාණ්ඩ වෙනස් කරන්න,භාණ්ඩය තෝරන්න", reply_markup=build_sale_edit_menu(user_id))
         return
 
     if data.startswith("SALE_EDIT_ITEM:"):
         idx = int(data.split(":")[1])
         cart = sale_cart.get(user_id, [])
         if idx < 0 or idx >= len(cart):
-            await query.message.reply_text("Invalid item.")
+            await query.message.reply_text("Invalid item.\nවැරදී")
             return
         it = cart[idx]
         await query.message.reply_text(
@@ -537,11 +537,11 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = int(data.split(":")[1])
         cart = sale_cart.get(user_id, [])
         if idx < 0 or idx >= len(cart):
-            await query.message.reply_text("Invalid item.")
+            await query.message.reply_text("Invalid item.\nවැරදී")
             return
 
         removed = cart.pop(idx)
-        msg = format_cart_message(user_id, added_line=f"Removed ❌\n- {removed['name']}")
+        msg = format_cart_message(user_id, added_line=f"Removed \n- {removed['name']}")
         await query.message.reply_text(msg, reply_markup=sale_action_buttons())
         return
 
@@ -549,7 +549,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = int(data.split(":")[1])
         cart = sale_cart.get(user_id, [])
         if idx < 0 or idx >= len(cart):
-            await query.message.reply_text("Invalid item.")
+            await query.message.reply_text("Invalid item.\nවැරදී")
             return
 
         sale_state[user_id] = "WAIT_EDIT_QTY"
@@ -557,7 +557,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         it = cart[idx]
 
         await query.message.reply_text(
-            f"Change Qty\nItem: {it['name']}\nEnter new quantity (example: 1 or 0.5):",
+            f"Change Qty\nItem: ප්‍රමාණය වෙනස් කරන්න\n{it['name']}\nEnter new quantity (example: 1 or 0.5):\nනව ප්‍රමාණ එකතු කරන්න",
             reply_markup=back_cancel_markup("SALE_EDIT", "SALE_CANCEL"),
         )
         return
@@ -585,18 +585,18 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
 
         if not chosen:
-            await query.message.reply_text("Product not found. Tap New Sale again.")
+            await query.message.reply_text("Product not found. Tap New Sale again.\nභාණ්ඩය සොයා ගත නොහැක. නැවත උත්සාහ කරන්න.")
             return
 
         if chosen.get("sell_price") is None:
-            await query.message.reply_text("This product has no sell price set. Add it first.")
+            await query.message.reply_text("This product has no sell price set. Add it first.\nවිකුනුම් මිලක් යොදා නැත. එය එක් කරන්න.")
             return
 
         sale_selected[user_id] = chosen
         sale_state[user_id] = "WAIT_QTY"
 
         await query.message.reply_text(
-            f"Selected: {chosen['name']}\nEnter quantity (example: 1 or 0.5):",
+            f"Selected: {chosen['name']}\nEnter quantity (example: 1 or 0.5):\nප්‍රමාණය ඇතුලත් කරන්න",
             reply_markup=back_cancel_markup("SALE_BACK_TO_MENU", "SALE_CANCEL"),
         )
         return
@@ -613,14 +613,14 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         purchase_state[user_id] = "WAIT_SEARCH"
         await query.message.reply_text(
-            "Purchase Product\nType product name to search:",
+            "Purchase Product\nType product name to search:\nසෙවීමට භාණ්ඩයේ නම ඇතුලත් කරන්න.",
             reply_markup=back_cancel_markup("PUR_BACK_MENU", "PUR_CANCEL"),
         )
         return
 
     if data == "PUR_BACK_MENU":
         clear_purchase(user_id)
-        await query.message.reply_text("Back to menu:", reply_markup=main_menu_markup())
+        await query.message.reply_text("Back to menu:\nනැවත මෙනුවට", reply_markup=main_menu_markup())
         return
 
     if data == "PUR_CANCEL":
@@ -638,13 +638,13 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not chosen:
-            await query.message.reply_text("Product not found. Tap Purchase Product again.")
+            await query.message.reply_text("Product not found. Tap Purchase Product again.\nභාණ්ඩය සොයාගත නොහැක.නැවත මිලදී ගැනීම ඇතුලත් කරන්න")
             return
 
         purchase_selected[user_id] = chosen
         purchase_state[user_id] = "WAIT_QTY"
         await query.message.reply_text(
-            f"Selected: {chosen['name']}\nEnter quantity purchased (example: 1 or 0.5):",
+            f"Selected: {chosen['name']}\nEnter quantity purchased (example: 1 or 0.5):\nමිලදී ගන්න ප්‍රමාණය ඇතුලත් කරන්න.",
             reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
         )
         return
@@ -652,7 +652,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "PUR_BACK_TO_RESULTS":
         purchase_state[user_id] = "WAIT_SEARCH"
         await query.message.reply_text(
-            "Type product name to search again:",
+            "Type product name to search again:\nනැවත සෙවීමට භාණ්ඩයේ නම ‍යොදන්න",
             reply_markup=back_cancel_markup("PUR_BACK_MENU", "PUR_CANCEL"),
         )
         return
@@ -669,7 +669,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         newp_state[user_id] = "WAIT_NEW_NAME"
         await query.message.reply_text(
-            "Add New Product\nEnter product name:",
+            "Add New Product\nEnter product name:\nනව තොග මිලදී ගැනීමට භාණ්ඩයේ නම ඇතුලත් කරන්න:",
             reply_markup=cancel_only_markup("NEWP"),
         )
         return
@@ -683,36 +683,36 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         step = newp_state.get(user_id)
         if step == "WAIT_NEW_UNIT":
             newp_state[user_id] = "WAIT_NEW_NAME"
-            await query.message.reply_text("Enter product name:", reply_markup=cancel_only_markup("NEWP"))
+            await query.message.reply_text("Enter product name:\nභාණ්ඩයේ නම ඇතුලත් කරන්න:", reply_markup=cancel_only_markup("NEWP"))
             return
         if step == "WAIT_NEW_QTY":
             newp_state[user_id] = "WAIT_NEW_UNIT"
-            await query.message.reply_text("Select unit:", reply_markup=unit_buttons_markup())
+            await query.message.reply_text("Select unit:\nඒකකය තෝරන්න:", reply_markup=unit_buttons_markup())
             return
         if step == "WAIT_NEW_COST":
             newp_state[user_id] = "WAIT_NEW_QTY"
             await query.message.reply_text(
-                "Enter purchase quantity (example: 5 or 0.5):",
+                "Enter purchase quantity (example: 5 or 0.5):\nමිලදී ගන්න ප්‍රමාණය ඇතුලත් කරන්න.",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
         if step == "WAIT_NEW_SELL":
             newp_state[user_id] = "WAIT_NEW_COST"
             await query.message.reply_text(
-                "Enter cost price per unit (example: 180):",
+                "Enter cost price per unit (example: 180):\nභාණ්ඩයේ පිරිවැය ඇතුලත් කරන්න:",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
         if step == "WAIT_NEW_ALERT":
             newp_state[user_id] = "WAIT_NEW_SELL"
             await query.message.reply_text(
-                "Enter selling price per unit (example: 250):",
+                "Enter selling price per unit (example: 250):\nභාණ්ඩයේ විකුනුම් මිල ඇතුලත් කරන්න.:",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
 
         clear_new_product(user_id)
-        await query.message.reply_text("Back to menu:", reply_markup=main_menu_markup())
+        await query.message.reply_text("Back to menu:\nමෙනුවට යාම:", reply_markup=main_menu_markup())
         return
 
     if data.startswith("NEWP_UNIT:"):
@@ -720,7 +720,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         newp_unit[user_id] = unit
         newp_state[user_id] = "WAIT_NEW_QTY"
         await query.message.reply_text(
-            f"Unit: {unit}\nEnter purchase quantity (example: 5 or 0.5):",
+            f"Unit: {unit}\nEnter purchase quantity (example: 5 or 0.5):\nමිලදී ගන්නා ඒකක ගනන ඇතුලත් කරන්න.",
             reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
         )
         return
@@ -745,7 +745,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         cashout_state[user_id] = "WAIT_AMOUNT"
         await update.message.reply_text(
-            "Enter cash out amount:",
+            "Enter cash out amount:\nඉවතට ගන්නා මුදල් ප්‍රමාණය.",
             reply_markup=back_cancel_markup("CASHOUT_BACK_REASON", "CASHOUT_CANCEL"),
         )
         return
@@ -757,7 +757,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid amount greater than 0.",
+                "Enter a valid amount greater than 0.වලන්ගු ප්‍රමානයක් ලබා දෙන්න",
                 reply_markup=back_cancel_markup("CASHOUT_BACK_REASON", "CASHOUT_CANCEL"),
             )
             return
@@ -779,7 +779,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         note = cashout_reason.get(user_id)
-        msg = f"Cash out recorded ✅\nAmount: {amount}"
+        msg = f"Cash out recorded \nAmount: {amount}"
         if note:
             msg += f"\nReason: {note}"
 
@@ -802,7 +802,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         products = r.json() or []
         if not products:
             await update.message.reply_text(
-                "No matches. Try another name.",
+                "No matches. Try another name.\nගැලපීම් නැත.වෙනත් නමක් උත්සහ කරන්න",
                 reply_markup=back_cancel_markup("SALE_BACK_TO_MENU", "SALE_CANCEL"),
             )
             return
@@ -812,13 +812,13 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton("Back", callback_data="SALE_BACK_TO_MENU")])
         buttons.append([InlineKeyboardButton("Cancel", callback_data="SALE_CANCEL")])
 
-        await update.message.reply_text("Select a product:", reply_markup=InlineKeyboardMarkup(buttons))
+        await update.message.reply_text("Select a product:\nභාණ්ඩය තෝරන්න", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if sale_state.get(user_id) == "WAIT_QTY":
         chosen = sale_selected.get(user_id)
         if not chosen:
-            await update.message.reply_text("No product selected. Tap New Sale again.")
+            await update.message.reply_text("No product selected. Tap New Sale again.\nභාණ්ඩ තෝරා නැත.නව විකුනුමක් කරන්න")
             clear_sale(user_id)
             return
 
@@ -828,7 +828,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid quantity (example: 1 or 0.5)",
+                "Enter a valid quantity (example: 1 or 0.5)\nවලන්ගු ප්‍රමාණයක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("SALE_BACK_TO_MENU", "SALE_CANCEL"),
             )
             return
@@ -866,7 +866,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cart = sale_cart.get(user_id, [])
         if idx is None or idx < 0 or idx >= len(cart):
             clear_sale(user_id)
-            await update.message.reply_text("Edit state lost. Open Edit Cart again.")
+            await update.message.reply_text("Edit state lost. Open Edit Cart again.\n උත්සහය අසාර්තකයි,නැවත කූඩය වෙනස් කිරීමට උත්සහ කරන්න.")
             return
 
         try:
@@ -875,7 +875,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid quantity (example: 1 or 0.5)",
+                "Enter a valid quantity (example: 1 or 0.5)\nවලන්ගු ප්‍රමාණයක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("SALE_EDIT", "SALE_CANCEL"),
             )
             return
@@ -883,7 +883,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cart[idx]["qty"] = new_qty
         clear_sale(user_id)
 
-        msg = format_cart_message(user_id, added_line=f"Updated ✅\n- {cart[idx]['name']} qty = {new_qty}")
+        msg = format_cart_message(user_id, added_line=f"Updated \n- {cart[idx]['name']} qty = {new_qty}")
         await update.message.reply_text(msg, reply_markup=sale_action_buttons())
         return
 
@@ -902,7 +902,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         products = r.json() or []
         if not products:
             await update.message.reply_text(
-                "No matches. Try another name.",
+                "No matches. Try another name.\nභාණ්ඩය සොයාගත නොහැක.නැවත ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("PUR_BACK_MENU", "PUR_CANCEL"),
             )
             return
@@ -912,7 +912,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton("Back", callback_data="PUR_BACK_MENU")])
         buttons.append([InlineKeyboardButton("Cancel", callback_data="PUR_CANCEL")])
 
-        await update.message.reply_text("Select a product to purchase:", reply_markup=InlineKeyboardMarkup(buttons))
+        await update.message.reply_text("Select a product to purchase:\nමිලදී ගැනීමට භාණ්ඩයේ නම ඇතුලත් කරන්න", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if purchase_state.get(user_id) == "WAIT_QTY":
@@ -922,14 +922,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid quantity (example: 1 or 0.5)",
+                "Enter a valid quantity (example: 1 or 0.5)\nවලන්ගු ප්‍රමාණයක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("PUR_BACK_TO_RESULTS", "PUR_CANCEL"),
         )
             return
 
         chosen = purchase_selected.get(user_id)
         if not chosen:
-            await update.message.reply_text("Purchase state lost. Tap Purchase Product again.")
+            await update.message.reply_text("Purchase state lost. Tap Purchase Product again.\nමිලදී ගැනීම නැවත උත්සහකරන්න")
             clear_purchase(user_id)
             return
 
@@ -956,7 +956,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         total = r.json().get("total_amount", "OK")
         await update.message.reply_text(
-            f"Purchase recorded ✅\nProduct: {chosen['name']}\nQty added: {qty}\nTotal cost: {total}",
+            f"Purchase recorded \nProduct: {chosen['name']}\nQty added: {qty}\nTotal cost: {total}",
             reply_markup=main_menu_markup(),
         )
         clear_purchase(user_id)
@@ -967,7 +967,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ADD NEW PRODUCT
     if newp_state.get(user_id) == "WAIT_NEW_NAME":
         if len(text) < 2:
-            await update.message.reply_text("Enter a valid product name:", reply_markup=cancel_only_markup("NEWP"))
+            await update.message.reply_text("Enter a valid product name:\nවලන්ගු භාණ්ඩ නමක් යොදන්න", reply_markup=cancel_only_markup("NEWP"))
             return
 
         newp_name[user_id] = text
@@ -982,7 +982,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid quantity (example: 5 or 0.5)",
+                "Enter a valid quantity (example: 5 or 0.5)\nවලන්ගු ප්‍රමාණයක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
@@ -990,7 +990,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         newp_qty[user_id] = qty
         newp_state[user_id] = "WAIT_NEW_COST"
         await update.message.reply_text(
-            "Enter cost price per unit (example: 180):",
+            "Enter cost price per unit (example: 180):\nඒකකයක පිරිවැය ඇතුලත් කරන්න",
             reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
         )
         return
@@ -1002,7 +1002,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid cost price (example: 180)",
+                "Enter a valid cost price (example: 180)\nවලන්ගු පිරිවැයක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
@@ -1010,7 +1010,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         newp_cost[user_id] = cost
         newp_state[user_id] = "WAIT_NEW_SELL"
         await update.message.reply_text(
-            "Enter selling price per unit (example: 250):",
+            "Enter selling price per unit (example: 250):\nඒකකයක විකුනුම් මිල ඇතුලත් කරන්න",
             reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
         )
         return
@@ -1022,7 +1022,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cost = newp_cost.get(user_id)
 
         if not name or not unit or qty is None or cost is None:
-            await update.message.reply_text("New product state lost. Tap Add New Product again.")
+            await update.message.reply_text("New product state lost. Tap Add New Product again.\nඋත්සහය අසාර්තකයි, නැවත භාණ්ඩ එක් කිරීමට උත්සහ කරන්න. ")
             clear_new_product(user_id)
             return
 
@@ -1032,7 +1032,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid selling price (example: 250)",
+                "Enter a valid selling price (example: 250)\nවලන්ගු මිලක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
@@ -1040,7 +1040,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         newp_sell[user_id] = sell
         newp_state[user_id] = "WAIT_NEW_ALERT"
         await update.message.reply_text(
-            "Enter stock alert quantity (example: 5). Use 0 to disable:",
+            "Enter stock alert quantity (example: 5). Use 0 to disable:\nඅවම තොග මට්ටමක් ඇතුලත් කරන්න",
             reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
         )
         return
@@ -1053,7 +1053,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sell = newp_sell.get(user_id)
 
         if not name or not unit or qty is None or cost is None or sell is None:
-            await update.message.reply_text("New product state lost. Tap Add New Product again.")
+            await update.message.reply_text("New product state lost. Tap Add New Product again.\nඋත්සහය අසාර්තකයි, නැවත භාණ්ඩ එක් කිරීමට උත්සහ කරන්න. ")
             clear_new_product(user_id)
             return
 
@@ -1063,7 +1063,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "Enter a valid alert quantity (example: 5). Use 0 to disable.",
+                "Enter a valid alert quantity (example: 5). Use 0 to disable.\nවලන්ගු අවම තොග මට්ටමක් ඇතුලත් කරන්න",
                 reply_markup=back_cancel_markup("NEWP_BACK", "NEWP_CANCEL"),
             )
             return
@@ -1125,7 +1125,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         total = r.json().get("total_amount", "OK")
         await update.message.reply_text(
-            f"Product added + Purchase recorded ✅\nProduct: {name}\nUnit: {unit}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nAlert qty: {alert}\nTotal cost: {total}",
+            f"Product added + Purchase recorded \nProduct: {name}\nUnit: {unit}\nQty: {qty}\nCost/unit: {cost}\nSell/unit: {sell}\nAlert qty: {alert}\nTotal cost: {total}",
             reply_markup=main_menu_markup(),
         )
         clear_new_product(user_id)
