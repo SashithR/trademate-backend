@@ -174,7 +174,7 @@ class CashOutCreate(BaseModel):
 
 
 # ---------------------------
-# AUTH: Signup / Signin / Me
+# AUTH: Signup / Signin 
 # ---------------------------
 @app.post("/auth/signup", response_model=AuthResponse)
 def auth_signup(payload: SignUpRequest):

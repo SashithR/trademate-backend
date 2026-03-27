@@ -14,7 +14,7 @@ from telegram.ext import (
 os.environ["HTTPX_FORCE_IPV4"] = "1"
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8222011135:AAGo_0CG8410KkoU1WWk5nW8CFBI8nlNBHU")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8222011135:AAFHHiBFsE0J85TYAgNRmy9x-FHfKGgfrG0")
 API_BASE = "http://127.0.0.1:8000"
 
 # --------- Local cache (optional) ---------
@@ -483,7 +483,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "SALE_FINISH":
         cart = sale_cart.get(user_id, [])
         if not cart:
-            await query.message.reply_text("Cart is empty. Add products first.\nසෙවීමට භාණ්ඩයේ නම ඉදිරිපත් කරන්න.")
+            await query.message.reply_text("Cart is empty. Add products first(Press above menu).\nසෙවීමට භාණ්ඩයේ නම ඉදිරිපත් කරන්න.(උඩ මෙනුව භාවිතා කරන්න)")
             return
 
         payload = {
