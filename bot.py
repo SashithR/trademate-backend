@@ -602,7 +602,7 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # =========================
-    # PURCHASE EXISTING FLOW
+    # PURCHASE EXISTING FLOW.
     # =========================
     if data == "PURCHASE_EXISTING":
         clear_sale(user_id)
